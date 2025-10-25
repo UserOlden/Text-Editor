@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Notepad + Copilot (single-file)</title>
+<style>
+  :root{
+    --bg:#0f1724; --panel:#071025; --muted:#9fb0c8; --accent:#60a5fa; --accent-2:#7ee7b8;
+    --surface:#071426; --line:#0b2740;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,var(--bg),#031223);color:#e6f2ff}
+  .app{display:grid;grid-template-rows:48px 1fr 26px;height:100vh;gap:8px;padding:10px;box-sizing:border-box}
+  /* top toolbar */
+  .toolbar{display:flex;align-items:center;gap:8px;padding:6px;border-radius:10px;background:linear-gradient(180deg,var(--panel),#071228);box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+  .toolbar .group{display:flex;gap:6px;align-items:center}
+  button, select, input[type="number"]{background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit;padding:6px 10px;border-radius:8px;cursor:pointer}
+  button:hover{transform:translateY(-1px)}
+  .toolbar button.icon{display:inline-flex;gap:8px;align-items:center}
+  .title{margin-left:8px;font-weight:700}
+  /* main area: editor + copilot side panel */
+  .main{display:grid;grid-template-columns:1fr 360px;gap:12px;height:100%}
+  .editorCard{background:linear-gradient(180deg,#021425,#041a2a);border-radius:10px;padding:10px;display:flex;flex-direction:column;min-width:0}
+  .editorTop{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .filename{font-size:13px;color:var(--muted)}
+  .editorWrap{display:flex;flex:1;overflow:hidden;border-radius:8px;background:linear-gradient(180deg,#061a2b,#022032);border:1px solid var(--line)}
+  .gutter{width:56px;padding:8px 6px 8px 10px;box-sizing:border-box;overflow:hidden;color:var(--muted);font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;background:linear-gradient(90deg, rgba(255,255,255,0.02), transparent)}
+  .gutter pre{margin:0;line-height:1.45;white-space:pre-wrap}
+  textarea.editor{
+    flex:1;resize:none;border:0;padding:12px 14px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;font-size:14px;color:#e6f2ff;background:transparent;outline:none;line-height:1.45;min-width:0;
+    white-space:pre;overflow:auto;
+  }
+  /* copilot panel */
+  .copilot{background:linear-gradient(180deg,#051726,#062233);padding:12px;border-radius:10px;border:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+  .copilot h3{margin:0;font-size:15px}
+  .copilot textarea{height:86px;border-radius:8px;padding:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit;resize:vertical}
+  .copilot .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .copilot .responses{flex:1;overflow:auto;padding:8px;border-radius:8px;background:linear-gradient(180deg,#071a29,#041629);border:1px solid rgba(255,255,255,0.02)}
+  .response{padding:8px;border-radius:8px;margin-bottom:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));font-family:inherit}
+  .small{font-size:12px;color:var(--muted)}
+  .status{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:8px;background:linear-gradient(180deg,#031523,#03212b);border:1px solid rgba(255,255,255,0.02)}
+  /* footer status bar */
+  .statusbar{display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-radius:8px;background:linear-gradient(180deg,#021425,#021a2a);color:var(--muted)}
+  .kbd{padding:4px 7px;border-radius:6px;background:#021b2b;border:1px solid rgba(255,255,255,0.02);font-family:ui-monospace,monospace}
+  /* small forms */
+  label{font-size:12px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+  input[type=file]{display:none}
+  .btn-ghost{background:transparent;border:1px dashed rgba(255,255,255,0.03)}
+  .flexcol{display:flex;flex-direction:column;gap:6px}
+  .muted{color:var(--muted)}
+  /* responsive */
+  @media (max-width:980px){
+    .main{grid-template-columns:1fr}
+    .copilot{order:2}
+  }
+</style>
+</head>
+<body>
+<div class="app" role="application" aria-label="Notepad with Copilot">
+  <!-- TOOLBAR -->
+  <div class="toolbar" role="toolbar" aria-label="Editor toolbar">
+    <div class="group">
+      <button id="btnNew" title="New (Ctrl+N)">New</button>
+      <label for="fileOpen" class="icon"><button id="btnOpen">Open</button></label>
+      <input type="file" id="fileOpen" accept="*/*"/>
+      <button id="btnSave" title="Save (Ctrl+S)">Save</button>
+      <button id="btnSaveAs" title="Save As">Save As</button>
+    </div>
+
+    <div class="group" style="margin-left:8px">
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+    </div>
+
+    <div class="group" style="margin-left:auto">
+      <label class="small">Wrap <input type="checkbox" id="wrapToggle" checked></label>
+      <label class="small">Font <input id="fontSize" type="number" min="10" max="28" value="14" style="width:66px"></label>
+      <button id="findBtn" title="Find (Ctrl+F)">Find</button>
+    </div>
+
+    <div class="group" style="margin-left:8px">
+      <div class="title">Notepad + Copilot</div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <!-- EDITOR -->
+    <div class="editorCard" aria-label="Text editor">
+      <div class="editorTop">
+        <div class="filename" id="fileLabel">Untitled.txt</div>
+      </div>
+
+      <div class="editorWrap">
+        <div class="gutter" aria-hidden="true"><pre id="lineNumbers">1</pre></div>
+        <textarea id="editor" class="editor" spellcheck="false" wrap="off" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      </div>
+    </div>
+
+    <!-- COPILOT PANEL -->
+    <div class="copilot" aria-label="Copilot panel">
+      <h3>Copilot</h3>
+      <div class="small muted">Mode:
+        <select id="aiMode">
+          <option value="local">Local (no API)</option>
+          <option value="api">API (custom endpoint)</option>
+        </select>
+      </div>
+
+      <div class="flexcol">
+        <label class="small">Prompt (what you want Copilot to do)</label>
+        <textarea id="aiPrompt" placeholder="e.g. Summarize the current file, Suggest improvements, Generate a function that does X..."></textarea>
+
+        <div class="controls">
+          <button id="runAi">Ask Copilot</button>
+          <button id="insertAi">Insert into editor</button>
+          <button id="replaceAi">Replace selection</button>
+
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <label class="small">Endpoint:</label>
+            <input id="apiUrl" type="text" placeholder="https://example.com/ai" style="min-width:160px">
+          </div>
+        </div>
+      </div>
+
+      <div class="responses" id="responses" role="log" aria-live="polite" aria-atomic="false"></div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="status small" id="aiStatus">Idle</div>
+        <button id="clearResponses" class="btn-ghost small">Clear</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- STATUS BAR -->
+  <div class="statusbar" aria-hidden="false">
+    <div class="muted" id="statusLeft">Ln 1, Col 1 — 0 words — 0 chars</div>
+    <div>
+      <span class="kbd">Ctrl+S</span> Save &nbsp;
+      <span class="kbd">Ctrl+O</span> Open &nbsp;
+      <span class="kbd">Ctrl+F</span> Find
+    </div>
+  </div>
+</div>
+
+<!-- FIND / REPLACE DIALOG (simple custom) -->
+<div id="findReplace" style="display:none;position:fixed;right:18px;top:70px;background:#042033;border:1px solid rgba(255,255,255,0.04);padding:12px;border-radius:10px;box-shadow:0 8px 30px rgba(2,6,23,0.6);z-index:999">
+  <div style="display:flex;gap:8px;align-items:center">
+    <input id="findInput" placeholder="Find..." style="width:240px;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04)">
+    <input id="replaceInput" placeholder="Replace..." style="width:240px;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04)">
+  </div>
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button id="findNext">Find Next</button>
+    <button id="replaceOne">Replace</button>
+    <button id="replaceAll">Replace All</button>
+    <button id="closeFind">Close</button>
+  </div>
+</div>
+
+<script>
+/* ---------------------------
+   Editor basic behavior
+   --------------------------- */
+const editor = document.getElementById('editor');
+const lineNumbers = document.getElementById('lineNumbers');
+const fileLabel = document.getElementById('fileLabel');
+const statusLeft = document.getElementById('statusLeft');
+let currentFilename = null;
+let savedText = '';
+let fileHandle = null; // future-proof (not used here)
+// initialize
+editor.value = '';
+editor.focus();
+
+/* Utility: update line numbers */
+function updateLineNumbers(){
+  const lines = editor.value.split('\\n').length || 1;
+  let nums = '';
+  for (let i=1;i<=lines;i++){ nums += i + '\\n'; }
+  lineNumbers.textContent = nums;
+}
+
+/* Utility: status (line/col/words/chars) */
+function updateStatus(){
+  const pos = editor.selectionStart;
+  const before = editor.value.slice(0,pos);
+  const line = (before.match(/\\n/g) || []).length + 1;
+  const col = pos - (before.lastIndexOf('\\n') + 1);
+  const words = (editor.value.match(/\\b\\w+\\b/g) || []).length;
+  const chars = editor.value.length;
+  statusLeft.textContent = `Ln ${line}, Col ${col} — ${words} words — ${chars} chars`;
+}
+
+/* sync scroll between gutter and textarea */
+editor.addEventListener('scroll', ()=>{ lineNumbers.scrollTop = editor.scrollTop; });
+
+editor.addEventListener('input', ()=>{
+  updateLineNumbers();
+  updateStatus();
+});
+
+/* keep initial numbers and status */
+updateLineNumbers();
+updateStatus();
+
+/* keyboard shortcuts */
+document.addEventListener('keydown', (e)=>{
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 's' || e.key === 'S') {
+      e.preventDefault(); saveFile();
+    } else if (e.key === 'o' || e.key === 'O') {
+      e.preventDefault(); document.getElementById('fileOpen').click();
+    } else if (e.key === 'n' || e.key === 'N') {
+      e.preventDefault(); newFile();
+    } else if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault(); openFind();
+    }
+  }
+});
+
+/* New / Open / Save */
+function newFile(){
+  if (editor.value && confirm('Discard current document and create new?')) {
+    editor.value = '';
+    currentFilename = null;
+    fileLabel.textContent = 'Untitled.txt';
+    updateLineNumbers(); updateStatus();
+  } else if (!editor.value){
+    editor.value = '';
+    currentFilename = null;
+    fileLabel.textContent = 'Untitled.txt';
+    updateLineNumbers(); updateStatus();
+  }
+}
+
+function openLocalFile(file){
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    editor.value = reader.result;
+    currentFilename = file.name;
+    fileLabel.textContent = currentFilename;
+    updateLineNumbers(); updateStatus();
+  };
+  reader.readAsText(file);
+}
+
+function saveFileAs(name){
+  const blob = new Blob([editor.value], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name || (currentFilename || 'untitled.txt');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  savedText = editor.value;
+}
+
+function saveFile(){
+  // For a quick single-file approach we use Save As
+  if (!currentFilename) currentFilename = prompt('Filename to save as', 'untitled.txt') || 'untitled.txt';
+  saveFileAs(currentFilename);
+}
+
+/* wire toolbar buttons */
+document.getElementById('btnNew').addEventListener('click', newFile);
+document.getElementById('fileOpen').addEventListener('change', (e)=> {
+  const f = e.target.files[0];
+  if (f) openLocalFile(f);
+  e.target.value = '';
+});
+document.getElementById('btnOpen').addEventListener('click', ()=> document.getElementById('fileOpen').click());
+document.getElementById('btnSave').addEventListener('click', saveFile);
+document.getElementById('btnSaveAs').addEventListener('click', ()=> {
+  const name = prompt('Save as filename', currentFilename || 'untitled.txt');
+  if (name) saveFileAs(name);
+});
+
+document.getElementById('undo').addEventListener('click', ()=> document.execCommand('undo'));
+document.getElementById('redo').addEventListener('click', ()=> document.execCommand('redo'));
+
+/* wrap / font size */
+document.getElementById('wrapToggle').addEventListener('change', (e)=>{
+  editor.wrap = e.target.checked ? 'soft' : 'off';
+  editor.style.whiteSpace = e.target.checked ? 'pre-wrap' : 'pre';
+});
+document.getElementById('fontSize').addEventListener('input', (e)=>{
+  editor.style.fontSize = e.target.value + 'px';
+});
+
+/* find & replace dialog */
+const findReplace = document.getElementById('findReplace');
+const findBtn = document.getElementById('findBtn');
+findBtn.addEventListener('click', openFind);
+function openFind(){
+  findReplace.style.display = 'block';
+  document.getElementById('findInput').focus();
+}
+document.getElementById('closeFind').addEventListener('click', ()=> { findReplace.style.display='none'; });
+
+document.getElementById('findNext').addEventListener('click', ()=> {
+  const needle = document.getElementById('findInput').value;
+  if (!needle) return;
+  const start = editor.selectionEnd;
+  const idx = editor.value.indexOf(needle, start);
+  if (idx === -1) {
+    alert('No more occurrences found.');
+    return;
+  }
+  editor.focus();
+  editor.selectionStart = idx;
+  editor.selectionEnd = idx + needle.length;
+  updateStatus();
+});
+
+document.getElementById('replaceOne').addEventListener('click', ()=>{
+  const needle = document.getElementById('findInput').value;
+  const replacement = document.getElementById('replaceInput').value;
+  if (!needle) return;
+  if (editor.selectionStart !== editor.selectionEnd && editor.value.slice(editor.selectionStart, editor.selectionEnd) === needle) {
+    const before = editor.value.slice(0, editor.selectionStart);
+    const after = editor.value.slice(editor.selectionEnd);
+    editor.value = before + replacement + after;
+  } else {
+    // find next and replace
+    const idx = editor.value.indexOf(needle, editor.selectionEnd);
+    if (idx === -1) return alert('Not found.');
+    editor.value = editor.value.slice(0, idx) + replacement + editor.value.slice(idx + needle.length);
+  }
+  updateLineNumbers(); updateStatus();
+});
+
+document.getElementById('replaceAll').addEventListener('click', ()=> {
+  const needle = document.getElementById('findInput').value;
+  const replacement = document.getElementById('replaceInput').value;
+  if (!needle) return;
+  editor.value = editor.value.split(needle).join(replacement);
+  updateLineNumbers(); updateStatus();
+});
+
+/* ---------------------------
+   Copilot: local + API
+   --------------------------- */
+const aiMode = document.getElementById('aiMode');
+const aiPrompt = document.getElementById('aiPrompt');
+const responses = document.getElementById('responses');
+const aiStatus = document.getElementById('aiStatus');
+const runAi = document.getElementById('runAi');
+const insertAi = document.getElementById('insertAi');
+const replaceAi = document.getElementById('replaceAi');
+const clearResponses = document.getElementById('clearResponses');
+const apiUrlInput = document.getElementById('apiUrl');
+
+clearResponses.addEventListener('click', ()=> { responses.innerHTML = ''; });
+function pushResponse(text, isUser=false){
+  const div = document.createElement('div');
+  div.className = 'response';
+  div.innerHTML = `<div style="font-size:12px;color:${isUser ? '#7fd1ff' : '#cfe6ff'}">${isUser ? 'You' : 'Copilot'}</div><pre style="margin:6px 0 0;white-space:pre-wrap">${escapeHtml(text)}</pre>`;
+  responses.prepend(div);
+}
+
+function escapeHtml(str){
+  return (str+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* Local fallback Copilot (simple heuristics) */
+function localCopilot(prompt, content){
+  // simple heuristics for quick responses
+  prompt = (prompt||'').toLowerCase();
+  if (!prompt || prompt.includes('summar')) {
+    // summarise
+    const lines = content.split('\\n').slice(0,80);
+    const preview = lines.join('\\n');
+    const summary = `Summary (local): ${preview.length>240 ? preview.slice(0,240)+'…' : preview}`;
+    return summary;
+  }
+  if (prompt.includes('explain')) {
+    const sel = getSelectionOrLine(content);
+    return `Explanation (local): This snippet has ${sel.length} characters. It appears to ${isProbablyCode(sel) ? 'contain code — consider adding comments and descriptive names.' : 'be plain text.'}`;
+  }
+  if (prompt.includes('complete') || prompt.includes('finish') || prompt.includes('continue')){
+    const tail = content.split('\\n').pop() || '';
+    // produce a short completion
+    return tail + (tail ? ' // completed by Copilot (local)' : '/* Start writing here... */');
+  }
+  if (prompt.includes('refactor') || prompt.includes('improve')) {
+    return 'Refactor suggestion (local): extract repeated logic into functions, use clear variable names, and add comments for intent.';
+  }
+  // default: friendly suggestion
+  return "Copilot (local): I can (1) Summarize, (2) Explain, (3) Complete, or (4) Refactor. Try prompts like 'Summarize the file' or 'Complete the function'.";
+}
+
+function getSelectionOrLine(content){
+  const s = editor.selectionStart, e = editor.selectionEnd;
+  if (s !== e) return content.slice(s,e);
+  const before = content.slice(0,s);
+  const a = before.lastIndexOf('\\n') + 1;
+  const b = content.indexOf('\\n', s);
+  return content.slice(a, (b===-1?content.length:b));
+}
+
+function isProbablyCode(text){
+  return /\\b(function|var|let|const|def|class|return|=>|{|;|console\\.log)\\b/.test(text);
+}
+
+/* Function to call API (generic contract) */
+async function callApi(endpoint, prompt, content){
+  // The contract is simple: POST JSON { prompt, content }, expect JSON { reply: "..." } or plain text
+  aiStatus.textContent = 'Waiting...';
+  try {
+    const res = await fetch(endpoint, {
+      method:'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, content })
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      aiStatus.textContent = `API error: ${res.status}`;
+      return `Error ${res.status}: ${txt}`;
+    }
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const j = await res.json();
+      // look for common fields
+      if (j.reply) return j.reply;
+      if (j.choices && j.choices[0] && j.choices[0].message) return j.choices[0].message.content || JSON.stringify(j);
+      if (j.choices && j.choices[0] && j.choices[0].text) return j.choices[0].text;
+      return JSON.stringify(j, null, 2);
+    } else {
+      return await res.text();
+    }
+  } catch (err){
+    aiStatus.textContent = 'Network error';
+    return `Network error: ${err.message}`;
+  } finally {
+    aiStatus.textContent = 'Idle';
+  }
+}
+
+/* Run Copilot */
+runAi.addEventListener('click', async ()=>{
+  const prompt = aiPrompt.value.trim();
+  const content = editor.value;
+  pushResponse(prompt, true);
+  aiStatus.textContent = 'Thinking...';
+  if (aiMode.value === 'local') {
+    // instant local reply
+    const reply = localCopilot(prompt, content);
+    pushResponse(reply, false);
+    aiStatus.textContent = 'Idle';
+    return;
+  } else {
+    const url = apiUrlInput.value.trim();
+    if (!url) { alert('Set an API endpoint URL in the Endpoint field. It must accept POST { prompt, content }.'); aiStatus.textContent='Idle'; return; }
+    // call generic API - user responsibility to allow CORS/auth
+    const reply = await callApi(url, prompt, content);
+    pushResponse(reply, false);
+  }
+});
+
+/* Insert/replace with selected AI response (uses topmost response) */
+insertAi.addEventListener('click', ()=>{
+  const top = responses.querySelector('.response pre');
+  if (!top) return alert('No Copilot responses yet.');
+  const txt = unescapeHtml(top.textContent || top.innerText);
+  // insert at cursor
+  const s = editor.selectionStart, e = editor.selectionEnd;
+  editor.value = editor.value.slice(0,s) + txt + editor.value.slice(e);
+  updateLineNumbers(); updateStatus();
+});
+replaceAi.addEventListener('click', ()=>{
+  const top = responses.querySelector('.response pre');
+  if (!top) return alert('No Copilot responses yet.');
+  const txt = unescapeHtml(top.textContent || top.innerText);
+  const s = editor.selectionStart, e = editor.selectionEnd;
+  editor.value = editor.value.slice(0,s) + txt + editor.value.slice(e);
+  updateLineNumbers(); updateStatus();
+});
+
+function unescapeHtml(str){
+  return str.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+}
+
+/* small helper to auto-detect content changes and update status */
+editor.addEventListener('click', updateStatus);
+editor.addEventListener('keyup', updateStatus);
+editor.addEventListener('mouseup', updateStatus);
+
+/* helper: expose simple sample API snippet in status if user chooses api mode */
+aiMode.addEventListener('change', ()=> {
+  if (aiMode.value === 'api') {
+    // provide example payload and quick hint
+    aiStatus.textContent = 'API mode — endpoint must accept POST JSON { prompt, content } and return JSON { reply: "..." } or plain text.';
+  } else {
+    aiStatus.textContent = 'Local mode';
+  }
+});
+
+/* set initial small hint */
+aiStatus.textContent = 'Local mode';
+
+/* small helper: when clicking a response pre, copy it to clipboard */
+responses.addEventListener('click', (e)=> {
+  const pre = e.target.closest('pre');
+  if (!pre) return;
+  navigator.clipboard?.writeText(pre.textContent || pre.innerText).then(()=> {
+    aiStatus.textContent = 'Copied response';
+    setTimeout(()=> aiStatus.textContent = 'Idle', 1200);
+  }, ()=> {
+    aiStatus.textContent = 'Copy failed';
+  });
+});
+
+/* escape early for UX */
+function escapeHtmlForDownload(s){
+  return s;
+}
+
+/* helper functions for saving/loading preference (not required but nice) */
+window.addEventListener('beforeunload', (e)=>{
+  if (editor.value !== savedText) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+/* small accessibility: focus editor on load */
+window.addEventListener('load', ()=> editor.focus());
+</script>
+</body>
+</html>
